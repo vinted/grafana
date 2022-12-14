@@ -13,6 +13,7 @@ import (
 	"github.com/grafana/grafana/pkg/models"
 	"github.com/grafana/grafana/pkg/plugins"
 	"github.com/grafana/grafana/pkg/plugins/adapters"
+	"github.com/grafana/grafana/pkg/services/contexthandler"
 	"github.com/grafana/grafana/pkg/services/datasources"
 	"github.com/grafana/grafana/pkg/services/oauthtoken"
 	"github.com/grafana/grafana/pkg/services/user"
@@ -132,6 +133,7 @@ func (s *Service) QueryData(ctx context.Context, user *user.SignedInUser, skipCa
 func (s *Service) handleExpressions(ctx context.Context, user *user.SignedInUser, parsedReq *parsedRequest) (*backend.QueryDataResponse, error) {
 	exprReq := expr.Request{
 		Queries: []expr.Query{},
+		Headers: putPassThroughHeaders(ctx, map[string]string{}),
 	}
 
 	if user != nil { // for passthrough authentication, SSE does not authenticate
@@ -173,6 +175,26 @@ func (s *Service) handleExpressions(ctx context.Context, user *user.SignedInUser
 	return qdr, nil
 }
 
+// putPassThroughHeaders gets request context and then loads useful
+// headers that will end up in the downstream request.
+func putPassThroughHeaders(ctx context.Context, headers map[string]string) map[string]string {
+	reqCtx := contexthandler.FromContext(ctx)
+	if reqCtx == nil || reqCtx.Req == nil {
+		return headers
+	}
+
+	if reqCtx != nil && reqCtx.Req != nil {
+		passThroughHeaders := []string{HeaderDashboardUID, HeaderPanelID}
+		httpReq := reqCtx.Req
+
+		for _, headerName := range passThroughHeaders {
+			headers[headerName] = httpReq.Header.Get(headerName)
+		}
+	}
+
+	return headers
+}
+
 // handleQuerySingleDatasource handles one or more queries to a single datasource
 func (s *Service) handleQuerySingleDatasource(ctx context.Context, user *user.SignedInUser, parsedReq *parsedRequest) (*backend.QueryDataResponse, error) {
 	queries := parsedReq.getFlattenedQueries()
@@ -200,7 +222,7 @@ func (s *Service) handleQuerySingleDatasource(ctx context.Context, user *user.Si
 			User:                       adapters.BackendUserFromSignedInUser(user),
 			DataSourceInstanceSettings: instanceSettings,
 		},
-		Headers: map[string]string{},
+		Headers: putPassThroughHeaders(ctx, map[string]string{}),
 		Queries: []backend.DataQuery{},
 	}
 
